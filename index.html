@@ -60,8 +60,11 @@
 
   /* ---------- Vídeo ---------- */
   #stage{position:relative;flex:1;min-height:0;background:#000;overflow:hidden}
+  /* a caixa do preview tem exatamente a proporção do formato de gravação
+     escolhido (WYSIWYG): o que aparece nela é o que sai no arquivo */
+  #videoBox{position:absolute;inset:0;margin:auto;overflow:hidden;background:#000}
   video#preview{
-    position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000;
+    display:block;width:100%;height:100%;object-fit:cover;background:#000;
   }
   video#preview.mirror{transform:scaleX(-1)}
   #countdown{
@@ -132,6 +135,25 @@
   }
   .row{display:flex;align-items:center;gap:10px}
   .row.center{justify-content:center}
+
+  /* ---------- Formato de gravação ---------- */
+  #fmtRow{gap:8px}
+  #fmtRow .fmtlabel{
+    font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--ink-dim);flex-shrink:0;
+  }
+  #fmtChips{display:flex;gap:6px;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none}
+  #fmtChips::-webkit-scrollbar{display:none}
+  .chip{
+    appearance:none;cursor:pointer;flex-shrink:0;
+    border:1px solid var(--line);background:var(--panel-2);color:var(--ink-dim);
+    border-radius:10px;padding:5px 10px;font-size:12.5px;font-weight:700;line-height:1.15;
+    display:flex;flex-direction:column;align-items:center;gap:1px;
+    transition:border-color .15s,color .15s,background .15s;
+  }
+  .chip small{font-size:9.5px;font-weight:600;letter-spacing:.02em;opacity:.85}
+  .chip.on{border-color:var(--amber);color:var(--amber);background:rgba(240,165,60,.08)}
+  body.rec .chip{opacity:.45;pointer-events:none}
 
   #recBtn{
     appearance:none;border:0;cursor:pointer;flex-shrink:0;
@@ -217,7 +239,7 @@
 </header>
 
 <div id="stage">
-  <video id="preview" autoplay muted playsinline class="mirror"></video>
+  <div id="videoBox"><video id="preview" autoplay muted playsinline class="mirror"></video></div>
   <div id="prompter">
     <div id="textMask"><div id="scrollArea"><div id="scriptText"></div></div></div>
     <div id="readline"></div>
@@ -231,6 +253,15 @@
 
 <div id="controls">
   <div id="dlRow"><span id="dlName"></span><a id="dlLink" download>Baixar vídeo</a></div>
+  <div class="row" id="fmtRow">
+    <span class="fmtlabel">Formato</span>
+    <div id="fmtChips">
+      <button class="chip" data-fmt="reels" title="1080×1920 — Reels, Stories, Shorts, TikTok">9:16<small>Reels · Shorts</small></button>
+      <button class="chip" data-fmt="feed" title="1080×1350 — Feed do Instagram (retrato)">4:5<small>Feed IG</small></button>
+      <button class="chip" data-fmt="square" title="1080×1080 — Feed quadrado">1:1<small>Quadrado</small></button>
+      <button class="chip" data-fmt="wide" title="1920×1080 — YouTube, TV, horizontal">16:9<small>YouTube</small></button>
+    </div>
+  </div>
   <div class="row">
     <button id="playBtn" title="Rolar texto (Espaço)">▶</button>
     <button id="recBtn" title="Gravar / Parar"></button>
@@ -272,13 +303,22 @@ const preview=$('preview'), prompter=$('prompter'), scrollArea=$('scrollArea'),
       scriptText=$('scriptText'), recBtn=$('recBtn'), playBtn=$('playBtn'),
       wpmSlider=$('wpm'), fsSlider=$('fs'), wpmOut=$('wpmOut'), fsOut=$('fsOut'),
       ovSlider=$('ov'), ovOut=$('ovOut'),
+      stage=$('stage'), videoBox=$('videoBox'), fmtChips=$('fmtChips'),
       timerEl=$('timer'), statsEl=$('stats'), countdownEl=$('countdown');
 
 // fração da altura do vídeo onde fica a linha de leitura — no alto, perto da câmera
 const READ=0.18;
 
+// formatos de gravação: resolução exata do arquivo final (corte central da câmera)
+const FORMATS={
+  reels :{w:1080,h:1920},  // 9:16 — Reels, Stories, Shorts, TikTok
+  feed  :{w:1080,h:1350},  // 4:5  — feed do Instagram (retrato)
+  square:{w:1080,h:1080},  // 1:1  — feed quadrado
+  wide  :{w:1920,h:1080},  // 16:9 — YouTube, TV, horizontal
+};
+
 let stream=null, recorder=null, chunks=[], recording=false, recT0=0, timerId=null;
-let facing='user';
+let facing='user', fmtKey='reels', compositor=null;
 let scrolling=false, offset=0, lastTs=0, rafId=null, pxPerSec=0;
 let wordCount=0;
 
@@ -392,6 +432,26 @@ ovSlider.oninput=()=>{
   localStorage_set('prompter_ov', ovSlider.value);
 };
 
+/* ============ Formato de gravação ============ */
+/* maior caixa com a proporção do formato que cabe no palco, centralizada —
+   o preview mostra exatamente o enquadramento que será gravado */
+function fitVideoBox(){
+  const f=FORMATS[fmtKey], sw=stage.clientWidth, sh=stage.clientHeight;
+  const w=Math.min(sw, sh*(f.w/f.h));
+  videoBox.style.width=w+'px';
+  videoBox.style.height=(w*f.h/f.w)+'px';
+}
+function setFormat(k){
+  fmtKey=k; localStorage_set('prompter_fmt', k);
+  for(const b of fmtChips.children) b.classList.toggle('on', b.dataset.fmt===k);
+  fitVideoBox();
+  if(stream && !recording) startCamera(); // re-negocia a resolução ideal da câmera
+}
+fmtChips.addEventListener('click',e=>{
+  const b=e.target.closest('.chip');
+  if(b && !recording) setFormat(b.dataset.fmt);
+});
+
 /* ============ Editor ============ */
 const editor=$('editor'), scriptInput=$('scriptInput');
 $('editBtn').onclick=()=>{ scriptInput.value=scriptText.textContent; editor.classList.add('show'); scriptInput.focus(); };
@@ -401,8 +461,9 @@ $('saveScript').onclick=()=>{ setText(scriptInput.value.trim()||DEFAULT_TEXT); e
 /* ============ Câmera ============ */
 async function startCamera(){
   if(stream) stream.getTracks().forEach(t=>t.stop());
+  const f=FORMATS[fmtKey];
   const constraints={
-    video:{ facingMode:facing, width:{ideal:1920}, height:{ideal:1080} },
+    video:{ facingMode:facing, width:{ideal:f.w}, height:{ideal:f.h} },
     audio:{ echoCancellation:true, noiseSuppression:true }
   };
   try{
@@ -444,6 +505,33 @@ async function countdown(n){
   countdownEl.style.display='none';
 }
 
+/* desenha a câmera num canvas com a resolução exata do formato (corte central,
+   sem espelhamento — o arquivo sai como uma câmera de verdade gravaria) e
+   grava o canvas + áudio do microfone */
+function makeCompositor(f){
+  const canvas=document.createElement('canvas');
+  canvas.width=f.w; canvas.height=f.h;
+  const ctx=canvas.getContext('2d');
+  let running=true;
+  const schedule = preview.requestVideoFrameCallback
+    ? cb=>preview.requestVideoFrameCallback(cb)
+    : cb=>requestAnimationFrame(cb);
+  const draw=()=>{
+    if(!running) return;
+    const vw=preview.videoWidth, vh=preview.videoHeight;
+    if(vw && vh){
+      const scale=Math.max(f.w/vw, f.h/vh);
+      const sw=f.w/scale, sh=f.h/scale;
+      ctx.drawImage(preview,(vw-sw)/2,(vh-sh)/2,sw,sh,0,0,f.w,f.h);
+    }
+    schedule(draw);
+  };
+  draw();
+  const cs=canvas.captureStream(30);
+  const out=new MediaStream([...cs.getVideoTracks(), ...stream.getAudioTracks()]);
+  return { stream:out, stop(){ running=false; cs.getTracks().forEach(t=>t.stop()); } };
+}
+
 recBtn.onclick=async()=>{
   if(recording){ // parar
     recorder.stop();
@@ -457,15 +545,29 @@ recBtn.onclick=async()=>{
   }
   await countdown(3);
   chunks=[];
-  recorder=new MediaRecorder(stream, mime?{mimeType:mime, videoBitsPerSecond:5_000_000}:{});
+  const f=FORMATS[fmtKey];
+  let recStream=stream, recLabel='';
+  compositor=null;
+  try{
+    if(HTMLCanvasElement.prototype.captureStream){
+      compositor=makeCompositor(f);
+      recStream=compositor.stream;
+      recLabel=`_${f.w}x${f.h}`;
+    }
+  }catch(err){ // navegador sem suporte à composição: grava o stream bruto da câmera
+    compositor=null; recStream=stream; recLabel='';
+  }
+  const bitrate=Math.min(12_000_000, Math.round(f.w*f.h*4.5));
+  recorder=new MediaRecorder(recStream, mime?{mimeType:mime, videoBitsPerSecond:bitrate}:{});
   recorder.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
   recorder.onstop=()=>{
     recording=false; document.body.classList.remove('rec');
     clearInterval(timerId); stopScroll();
+    if(compositor){ compositor.stop(); compositor=null; }
     const type=recorder.mimeType||'video/webm';
     const ext=type.includes('mp4')?'mp4':'webm';
     const blob=new Blob(chunks,{type});
-    const name=`gravacao_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.${ext}`;
+    const name=`gravacao${recLabel}_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.${ext}`;
     const url=URL.createObjectURL(blob);
     const a=$('dlLink'); a.href=url; a.download=name;
     $('dlName').textContent=`${name} · ${(blob.size/1048576).toFixed(1)} MB`;
@@ -494,11 +596,13 @@ document.addEventListener('keydown',e=>{
 // re-mede paddings e velocidade sempre que o overlay mudar de tamanho
 // (rotação da tela, aparecimento da barra de download, etc.)
 if(window.ResizeObserver){
-  new ResizeObserver(()=>{ layoutPrompter(); recalcSpeed(); }).observe(prompter);
+  new ResizeObserver(()=>{ fitVideoBox(); layoutPrompter(); recalcSpeed(); }).observe(prompter);
 }else{
-  window.addEventListener('resize',()=>requestAnimationFrame(()=>{ layoutPrompter(); recalcSpeed(); }));
+  window.addEventListener('resize',()=>requestAnimationFrame(()=>{ fitVideoBox(); layoutPrompter(); recalcSpeed(); }));
 }
 prompter.style.setProperty('--read',(READ*100)+'%');
+const savedFmt=localStorage_get('prompter_fmt');
+setFormat(FORMATS[savedFmt] ? savedFmt : 'reels');
 const savedFs=localStorage_get('prompter_fs');
 if(savedFs){ fsSlider.value=savedFs; }
 document.documentElement.style.setProperty('--fs', fsSlider.value+'px');
