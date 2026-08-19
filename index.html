@@ -72,9 +72,10 @@
   }
   #permMsg{
     position:absolute;inset:0;display:flex;flex-direction:column;gap:14px;
-    align-items:center;justify-content:center;text-align:center;padding:30px;z-index:5;
-    color:var(--ink-dim);font-size:15px;
+    align-items:center;justify-content:center;text-align:center;padding:30px;z-index:15;
+    color:var(--ink-dim);font-size:15px;pointer-events:none;
   }
+  #permMsg>*{pointer-events:auto}
   #permMsg button{
     appearance:none;border:0;background:var(--amber);color:#1a1206;font-weight:700;
     font-size:16px;padding:13px 26px;border-radius:12px;cursor:pointer;
@@ -82,37 +83,46 @@
   }
   #permMsg button:active{transform:scale(.96)}
 
-  /* ---------- Teleprompter ---------- */
+  /* ---------- Teleprompter: overlay transparente sobre o vídeo ---------- */
+  /* O texto passa por cima da imagem e sobe em direção à câmera (no alto da
+     tela), para que o olhar do apresentador fique o mais perto possível da lente. */
   #prompter{
-    position:relative;height:32dvh;min-height:150px;background:var(--panel);
-    border-top:1px solid var(--line);overflow:hidden;z-index:10;touch-action:none;
+    position:absolute;inset:0;z-index:10;overflow:hidden;touch-action:none;
+    --ov:.45; /* opacidade da faixa escura atrás do texto (controle "Fundo") */
+    background:linear-gradient(180deg,
+      rgba(0,0,0,var(--ov)) 0%,
+      rgba(0,0,0,var(--ov)) 52%,
+      rgba(0,0,0,0) 100%);
+  }
+  /* o texto surge e some com fade nas bordas, sem tampar o vídeo com painéis sólidos */
+  #textMask{
+    position:absolute;inset:0;
+    -webkit-mask-image:linear-gradient(180deg,transparent 0,#000 6%,#000 76%,transparent 94%);
+    mask-image:linear-gradient(180deg,transparent 0,#000 6%,#000 76%,transparent 94%);
   }
   #scrollArea{
     position:absolute;inset:0;will-change:transform;
-    padding:0 6vw;
+    padding:0 7vw;
   }
   #scriptText{
     font-size:var(--fs,30px);line-height:1.55;font-weight:600;color:var(--ink);
-    letter-spacing:.005em;white-space:pre-wrap;
-    padding:16dvh 0 32dvh; /* espaço para o texto entrar e sair pela linha de leitura */
+    letter-spacing:.005em;white-space:pre-wrap;text-align:center;
+    text-shadow:0 1px 3px rgba(0,0,0,.9),0 0 18px rgba(0,0,0,.55);
     text-wrap:balance;
   }
-  /* linha de leitura — a assinatura do prompter */
+  /* linha de leitura — no alto, logo abaixo da câmera */
   #readline{
-    position:absolute;left:0;right:0;top:38%;height:0;pointer-events:none;z-index:3;
+    position:absolute;left:0;right:0;top:var(--read,18%);height:0;pointer-events:none;z-index:3;
   }
   #readline::before{
     content:"";position:absolute;left:10px;top:-7px;
     border:7px solid transparent;border-left:11px solid var(--amber);
+    filter:drop-shadow(0 1px 2px rgba(0,0,0,.8));
   }
   #readline::after{
     content:"";position:absolute;left:0;right:0;top:0;height:1px;
     background:linear-gradient(90deg,var(--amber) 0,transparent 55%);opacity:.5;
   }
-  /* névoa acima/abaixo da linha para focar o olhar */
-  #prompter .fog{position:absolute;left:0;right:0;pointer-events:none;z-index:2}
-  #prompter .fog.top{top:0;height:22%;background:linear-gradient(var(--panel),transparent)}
-  #prompter .fog.bot{bottom:0;height:34%;background:linear-gradient(transparent,var(--panel))}
 
   /* ---------- Controles ---------- */
   #controls{
@@ -208,18 +218,15 @@
 
 <div id="stage">
   <video id="preview" autoplay muted playsinline class="mirror"></video>
+  <div id="prompter">
+    <div id="textMask"><div id="scrollArea"><div id="scriptText"></div></div></div>
+    <div id="readline"></div>
+  </div>
   <div id="countdown"></div>
   <div id="permMsg">
-    <div>Este app grava vídeo com a câmera e microfone do aparelho, com teleprompter na parte de baixo. Nada é enviado a nenhum servidor — o vídeo fica só no seu dispositivo.</div>
+    <div>Este app grava vídeo com a câmera e microfone do aparelho, com o texto do teleprompter passando transparente por cima da imagem, perto da câmera. Nada é enviado a nenhum servidor — o vídeo fica só no seu dispositivo.</div>
     <button id="startCam">Ativar câmera</button>
   </div>
-</div>
-
-<div id="prompter">
-  <div id="scrollArea"><div id="scriptText"></div></div>
-  <div id="readline"></div>
-  <div class="fog top"></div>
-  <div class="fog bot"></div>
 </div>
 
 <div id="controls">
@@ -231,9 +238,15 @@
       <label>Velocidade <output id="wpmOut">140 ppm</output></label>
       <input type="range" id="wpm" min="80" max="220" step="5" value="140">
     </div>
+  </div>
+  <div class="row">
     <div class="sliderbox">
       <label>Fonte <output id="fsOut">30 px</output></label>
       <input type="range" id="fs" min="20" max="64" step="2" value="30">
+    </div>
+    <div class="sliderbox">
+      <label>Fundo <output id="ovOut">45 %</output></label>
+      <input type="range" id="ov" min="0" max="85" step="5" value="45">
     </div>
   </div>
   <div class="row center"><span id="stats"></span></div>
@@ -258,7 +271,11 @@ const $ = id => document.getElementById(id);
 const preview=$('preview'), prompter=$('prompter'), scrollArea=$('scrollArea'),
       scriptText=$('scriptText'), recBtn=$('recBtn'), playBtn=$('playBtn'),
       wpmSlider=$('wpm'), fsSlider=$('fs'), wpmOut=$('wpmOut'), fsOut=$('fsOut'),
+      ovSlider=$('ov'), ovOut=$('ovOut'),
       timerEl=$('timer'), statsEl=$('stats'), countdownEl=$('countdown');
+
+// fração da altura do vídeo onde fica a linha de leitura — no alto, perto da câmera
+const READ=0.18;
 
 let stream=null, recorder=null, chunks=[], recording=false, recT0=0, timerId=null;
 let facing='user';
@@ -268,9 +285,11 @@ let wordCount=0;
 const DEFAULT_TEXT =
 `Bem-vindo ao Prompter Cam.
 
+O texto passa por cima do vídeo, como uma transparência, e sobe em direção à câmera — assim você lê olhando praticamente para a lente.
+
 Toque no botão "Texto" para colar o seu roteiro. A velocidade padrão é de 140 palavras por minuto — o ritmo natural de leitura em voz alta em português, nem apressado, nem arrastado.
 
-Ajuste a velocidade e o tamanho da fonte pelos controles abaixo. A seta âmbar marca a linha que você deve estar lendo: mantenha o olhar nela, próximo da câmera.
+A seta âmbar, no alto da tela, marca a linha que você deve estar lendo. Ajuste velocidade e fonte pelos controles abaixo; o controle "Fundo" escurece ou clareia a faixa atrás do texto.
 
 Quando estiver pronto, aperte o botão vermelho. Após a contagem regressiva, a gravação e a rolagem começam juntas. Bom take!`;
 
@@ -279,6 +298,7 @@ function setText(t){
   scriptText.textContent = t;
   localStorage_set('prompter_text', t);
   wordCount = (t.trim().match(/\S+/g)||[]).length;
+  layoutPrompter();
   resetScroll();
   recalcSpeed();
   updateStats();
@@ -304,8 +324,17 @@ function updateStats(){
     ? `${wordCount} palavras · leitura estimada: ${m}:${s} a ${wpm} ppm`
     : '';
 }
+/* paddings em px: o texto entra por baixo, e a última linha ainda alcança a
+   linha de leitura no alto. Com paddingTop = h·READ e paddingBottom = h·(1-READ),
+   o percurso total de rolagem vira exatamente a altura do texto (ver maxOffset). */
+function layoutPrompter(){
+  const h=prompter.clientHeight;
+  scriptText.style.paddingTop=Math.round(h*READ)+'px';
+  scriptText.style.paddingBottom=Math.round(h*(1-READ))+'px';
+  if(offset>maxOffset()){ offset=maxOffset(); applyOffset(); }
+}
 function maxOffset(){
-  return Math.max(0, scriptText.scrollHeight - prompter.clientHeight*0.38);
+  return Math.max(0, scriptText.scrollHeight - prompter.clientHeight);
 }
 function applyOffset(){
   scrollArea.style.transform = `translate3d(0, ${-offset}px, 0)`;
@@ -353,10 +382,14 @@ prompter.addEventListener('wheel',e=>{
 wpmSlider.oninput=()=>{ wpmOut.textContent=`${wpmSlider.value} ppm`; recalcSpeed(); };
 fsSlider.oninput=()=>{
   fsOut.textContent=`${fsSlider.value} px`;
-  scriptText.style.setProperty('--fs',''); // noop
   document.documentElement.style.setProperty('--fs', fsSlider.value+'px');
   localStorage_set('prompter_fs', fsSlider.value);
   requestAnimationFrame(recalcSpeed);
+};
+ovSlider.oninput=()=>{
+  ovOut.textContent=`${ovSlider.value} %`;
+  prompter.style.setProperty('--ov', ovSlider.value/100);
+  localStorage_set('prompter_ov', ovSlider.value);
 };
 
 /* ============ Editor ============ */
@@ -458,11 +491,22 @@ document.addEventListener('keydown',e=>{
 });
 
 /* ============ Init ============ */
-window.addEventListener('resize',()=>requestAnimationFrame(recalcSpeed));
+// re-mede paddings e velocidade sempre que o overlay mudar de tamanho
+// (rotação da tela, aparecimento da barra de download, etc.)
+if(window.ResizeObserver){
+  new ResizeObserver(()=>{ layoutPrompter(); recalcSpeed(); }).observe(prompter);
+}else{
+  window.addEventListener('resize',()=>requestAnimationFrame(()=>{ layoutPrompter(); recalcSpeed(); }));
+}
+prompter.style.setProperty('--read',(READ*100)+'%');
 const savedFs=localStorage_get('prompter_fs');
 if(savedFs){ fsSlider.value=savedFs; }
 document.documentElement.style.setProperty('--fs', fsSlider.value+'px');
 fsOut.textContent=`${fsSlider.value} px`;
+const savedOv=localStorage_get('prompter_ov');
+if(savedOv!==null){ ovSlider.value=savedOv; }
+prompter.style.setProperty('--ov', ovSlider.value/100);
+ovOut.textContent=`${ovSlider.value} %`;
 wpmOut.textContent=`${wpmSlider.value} ppm`;
 setText(localStorage_get('prompter_text')||DEFAULT_TEXT);
 
